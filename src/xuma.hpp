@@ -3,9 +3,13 @@
 
 #include <string>
 #include <vector>
+#include <mutex>
+#include <condition_variable>
 
 extern int maxNodes;
 extern int totalCores;
+extern std::mutex mutexExitFlag;
+extern std::condition_variable cvExitFlag;
 
 void getNodeMemory();
 void getCpuTime(const std::string& statLine, std::vector<int>& cpuTotalTime, std::vector<int>& cpuIdleTime);

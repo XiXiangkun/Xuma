@@ -10,9 +10,13 @@
 #include <chrono>
 #include <thread>
 #include <termios.h>
+#include <condition_variable>
+#include <mutex>
 
 int maxNodes = 0;
 int totalCores = 0;
+std::mutex mutexExitFlag;
+std::condition_variable cvExitFlag;
 
 void getNodeMemory(){
 		long long memorySize, memoryFreep;
@@ -145,17 +149,37 @@ void updateData(volatile bool& exitFlag, std::vector<float>& cpuUtilizationPerNo
 		while (!exitFlag) {
 				// getNodeMemory();
 				catProcStat(oldCpuTotalTime, oldCpuIdleTime, cpuTotalTime, cpuIdleTime, cpuUtilizationPerNode);
-				std::this_thread::sleep_for(std::chrono::seconds(1));
+				{
+						std::unique_lock<std::mutex> lock(mutexExitFlag);
+						if (cvExitFlag.wait_for(lock, std::chrono::seconds(2)) == std::cv_status::no_timeout) {
+								break;
+						}
+				}
 		}
 }
 
 void checkInput(volatile bool& exitFlag){
-		timeout(500);
-		while (!exitFlag) {
-				int ch = getch();
-				if(ch != ERR && (ch == 'q' || ch == 'Q')) {
-						exitFlag = true;
-						// endwin();
-				}
+		while (!exitFlag){
+				struct timeval timeout;
+        		timeout.tv_sec = 3;
+		        timeout.tv_usec = 0;
+		        fd_set fds;
+        		FD_ZERO(&fds);
+		        FD_SET(STDIN_FILENO, &fds);
+
+        		int ret = select(STDIN_FILENO + 1, &fds, NULL, NULL, &timeout);
+		        if (ret > 0) {
+        			    int ch = getch();
+		    	        if (ch != ERR) {
+		                		if (ch == 'q' || ch == 'Q') {
+										std::unique_lock<std::mutex> lock(mutexExitFlag);
+        			            		exitFlag = true;
+										cvExitFlag.notify_all();
+										break;
+				                }
+        				        // 处理其他输入
+                				// 逻辑判断...
+						}
+        		}
 		}
 }
