@@ -13,10 +13,6 @@
 #include <condition_variable>
 #include <mutex>
 
-int maxNodes = 0;
-int totalCores = 0;
-std::mutex mutexExitFlag;
-std::condition_variable cvExitFlag;
 
 void getNodeMemory(){
 		long long memorySize, memoryFreep;
@@ -52,13 +48,14 @@ void getCpuTime(const std::string& statLine, std::vector<int>& cpuTotalTime, std
 		return ;
 }
 
-void countCpuUtilization(std::vector<int>& oldCpuTotalTime, std::vector<int>& oldCpuIdleTime, std::vector<int>& cpuTotalTime, std::vector<int>& cpuIdleTime, std::vector<float>& cpuUtilizationPerNode){
+void countCpuUtilization(std::vector<int>& oldCpuTotalTime, std::vector<int>& oldCpuIdleTime, std::vector<int>& cpuTotalTime, std::vector<int>& cpuIdleTime){
 		int total, idle;
 		int	coresCount = 0;
 		int coresPerNode = totalCores / (maxNodes + 1);
 		float cpuUsed;
 		float cpuUsedPerNode = 0;
 		cpuUtilizationPerNode.clear();
+		cpuUtilizationPerCore.clear();
 		for (int i = 0; i < totalCores; i++){
 				total = cpuTotalTime[i] - oldCpuTotalTime[i];
 				// std::cout << "nowTotal: " << cpuTotalTime[i] << " oldTotal: " << oldCpuTotalTime[i] << " total: " << total << std::endl;
@@ -66,6 +63,7 @@ void countCpuUtilization(std::vector<int>& oldCpuTotalTime, std::vector<int>& ol
 				// std::cout << "nowIdle: " << cpuIdleTime[i] << " oldIdle: " << oldCpuIdleTime[i] << " idle: " << idle << std::endl;
 				cpuUsed = 1 - static_cast<float>(idle) / total;
 				// std::cout << "cpuUsed: " << cpuUsed << std::endl;
+				cpuUtilizationPerCore.push_back(cpuUsed);
 				if (coresCount < coresPerNode - 1){
 						cpuUsedPerNode += cpuUsed;
 						coresCount++;
@@ -79,7 +77,7 @@ void countCpuUtilization(std::vector<int>& oldCpuTotalTime, std::vector<int>& ol
 		return ;
 }
 
-void catProcStat(std::vector<int>& oldCpuTotalTime, std::vector<int>& oldCpuIdleTime, std::vector<int>& cpuTotalTime, std::vector<int>& cpuIdleTime, std::vector<float>& cpuUtilizationPerNode){
+void catProcStat(std::vector<int>& oldCpuTotalTime, std::vector<int>& oldCpuIdleTime, std::vector<int>& cpuTotalTime, std::vector<int>& cpuIdleTime){
 		oldCpuTotalTime = cpuTotalTime;
         oldCpuIdleTime = cpuIdleTime;
 		// std::vector<int>().swap(cpuTotalTime);
@@ -96,7 +94,7 @@ void catProcStat(std::vector<int>& oldCpuTotalTime, std::vector<int>& oldCpuIdle
 						continue;
 				}
 		}
-		countCpuUtilization(oldCpuTotalTime, oldCpuIdleTime, cpuTotalTime, cpuIdleTime, cpuUtilizationPerNode);
+		countCpuUtilization(oldCpuTotalTime, oldCpuIdleTime, cpuTotalTime, cpuIdleTime);
 		return ;
 }
 
@@ -116,49 +114,61 @@ void drawDetails(){
         printw(" Cores");
 }
 
-void drawProgressBar(int y, int x, const std::string& name, int start, int end, const std::vector<float>& data){
+void drawProgressBar(int y, int x, int start, int end, const std::vector<float>& data, int col){
 		int max_x, max_y;
         int counter = 0;
         auto startIterator = data.begin() + start;
         auto endIterator = data.begin() + end;
 		getmaxyx(stdscr, max_y, max_x);
-		int bar_width = (max_x / 2 - 4) / 3 * 2;
+		int bar_width = max_x / (col + 1) - 10;
+		float fillPercent = totalCores / maxNodes;
+		switch (col) {
+				case 2:
+						fillPercent = totalCores / maxNodes;
+						break;
+				case 4:
+						fillPercent = 1;
+						break;
+				default:
+						fillPercent = totalCores / maxNodes;
+						break;
+		}
 		for (auto it = startIterator; it != endIterator; it++) {
 				float percentage = *it;
-				float fill_width = bar_width * (percentage / (maxNodes + 1) * 2);
-				mvprintw(y + 1 + counter, x, "Node %d", start);
+				float fill_width = bar_width * (percentage / fillPercent);
+				mvprintw(y + 1 + counter, x + 1, "Node %d", start);
 				attron(COLOR_PAIR(1));
-				mvprintw(y + 1 + counter, x + 7, "[");
+				mvprintw(y + 1 + counter, x + 9, "[");
 				for (int i = 0; i < fill_width; ++i) {
-				 		mvprintw(y + 1 + counter, x + i + 8, "|");
+				 		mvprintw(y + 1 + counter, x + i + 10, "|");
 				}
-				mvprintw(y + 1 + counter, x + bar_width + 8, "]");
+				mvprintw(y + 1 + counter, x + bar_width + 10, "]");
 				attroff(COLOR_PAIR(1));
-				mvprintw(y + 1 + counter, x + bar_width + 1 + 8, " %.1f%%", percentage * 100);
+				mvprintw(y + 1 + counter, x + bar_width + 1 + 10, " %.1f%%", percentage * 100);
 				counter++;
 				start++;
 		}
 		return ;
 }
 
-void updateData(volatile bool& exitFlag, std::vector<float>& cpuUtilizationPerNode){
+void updateData(){
 		std::vector<int> oldCpuTotalTime(totalCores, 0);
         std::vector<int> oldCpuIdleTime(totalCores, 0);
         std::vector<int> cpuTotalTime;
         std::vector<int> cpuIdleTime;
 		while (!exitFlag) {
 				// getNodeMemory();
-				catProcStat(oldCpuTotalTime, oldCpuIdleTime, cpuTotalTime, cpuIdleTime, cpuUtilizationPerNode);
+				catProcStat(oldCpuTotalTime, oldCpuIdleTime, cpuTotalTime, cpuIdleTime);
 				{
-						std::unique_lock<std::mutex> lock(mutexExitFlag);
-						if (cvExitFlag.wait_for(lock, std::chrono::seconds(2)) == std::cv_status::no_timeout) {
+						std::unique_lock<std::mutex> lock(mutexStopFlag);
+						if (cvStopFlag.wait_for(lock, std::chrono::seconds(2)) == std::cv_status::no_timeout) {
 								break;
 						}
 				}
 		}
 }
 
-void checkInput(volatile bool& exitFlag){
+void checkInput(){
 		while (!exitFlag){
 				struct timeval timeout;
         		timeout.tv_sec = 3;
@@ -171,14 +181,45 @@ void checkInput(volatile bool& exitFlag){
 		        if (ret > 0) {
         			    int ch = getch();
 		    	        if (ch != ERR) {
-		                		if (ch == 'q' || ch == 'Q') {
-										std::unique_lock<std::mutex> lock(mutexExitFlag);
-        			            		exitFlag = true;
-										cvExitFlag.notify_all();
-										break;
-				                }
-        				        // 处理其他输入
-                				// 逻辑判断...
+								switch (ch) {
+										case 'q':
+										case 'Q':
+												{
+														// ModeFlag不会改变currentMode，但是会给main信号，退出当前循环
+														// exitFlag保证了循环不会再进入
+														std::unique_lock<std::mutex> lock(mutexModeFlag);
+														exitFlag = true;
+														cvModeFlag.notify_all();
+												}
+												{
+														// StopFlag用于updateData线程的终止
+														std::unique_lock<std::mutex> lock(mutexStopFlag);
+                                                        cvStopFlag.notify_all();
+												}
+														break;
+										case 'n':
+										case 'N':
+												{
+														std::unique_lock<std::mutex> lock(mutexModeFlag);
+														currentMode = 0;
+                                                        cvModeFlag.notify_all();
+														break;
+												}
+										case 'c':
+										case 'C':
+												{
+                                                        std::unique_lock<std::mutex> lock(mutexModeFlag);
+                                                        currentMode = 1;
+                                                        cvModeFlag.notify_all();
+                                                        break;
+                                                }
+										case 'i':
+										case 'I':
+												currentMode = 2;
+                                        		continue;
+										default:
+												break;
+								}
 						}
         		}
 		}
