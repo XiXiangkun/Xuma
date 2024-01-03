@@ -13,17 +13,38 @@
 #include <condition_variable>
 #include <mutex>
 
+bool isPerNode = false;
+int drawRow = 0;
+int drawCol = 0;
+
+struct CPUInfo {
+		std::string cpuNum;	
+		int user;			// 用户态nice优先级运行的时间ce优先级运行的时间
+		int nice;			// nice优先级运行的时间内核态核态
+		int system;			// 内核态空闲状态闲状态
+		int idle;			// 空闲状态等待I/O操作的时间待I/O操作的时间
+		int iowait;			// 等待I/O操作的时间处理硬件中断的时间理硬件中断的时间
+		int irq;			// 处理硬件中断的时间处理软件中断的时间理软件中断的时间
+		int softirq;		// 处理软件中断的时间虚拟化环境中处理器抢占时间拟化环境中处理器抢占时间
+		int steal;			// 虚拟化环境中处理器抢占时间虚拟CPU运行时间拟CPU运行时间
+		int guest;			// 虚拟CPU运行时间nice优先级运行的虚拟CPU时间ce优先级运行的虚拟CPU时间
+		int guest_nice;		// nice优先级运行的虚拟CPU时间
+};
 
 void getNodeMemory(){
-		long long memorySize, memoryFreep;
+		float tmpRes;
+		memUtilizationPerNode.clear();
+		long long memorySize, memoryFree;
 		struct bitmask *nodeMask = numa_allocate_nodemask();
         numa_bitmask_clearall(nodeMask);
         for (int node = 0; node <= maxNodes; ++node){
                 memorySize = numa_node_size64(node, nullptr);
                 numa_bitmask_setbit(nodeMask, node);
-                numa_node_size64(node, &memoryFreep);
+                numa_node_size64(node, &memoryFree);
+				tmpRes = 1 - static_cast<float>(memoryFree) / memorySize;
+				memUtilizationPerNode.push_back(tmpRes);
                 // std::cout << "Node " << node << " size: " << memorySize / 1024 / 1024 / 1024 << " GB" << std::endl;
-                // std::cout << "Node " << node << " available size: " << memoryFreep / 1024 / 1024 / 1024 << " GB" << std::endl;
+                // std::cout << "Node " << node << " available size: " << memoryFree / 1024 / 1024 / 1024 << " GB" << std::endl;
         }
         numa_bitmask_free(nodeMask);
 		return ;
@@ -32,19 +53,12 @@ void getNodeMemory(){
 void getCpuTime(const std::string& statLine, std::vector<int>& cpuTotalTime, std::vector<int>& cpuIdleTime){
 		// std::cout << statLine << std::endl;
 		std::istringstream iss(statLine);
-		std::vector<std::string> tokens(std::istream_iterator<std::string>{iss}, std::istream_iterator<std::string>());
+		CPUInfo cInfo;
 		int sum = 0;
-		int value = 0;
-		for (size_t i = 1; i <= 7; ++i){
-				value = std::stoi(tokens[i]);
-				sum += value;
-				if (i == 4){
-						cpuIdleTime.push_back(value);
-						// std::cout << "idle: " << value << std::endl;
-				}
-		}
+		iss >> cInfo.cpuNum >> cInfo.user >> cInfo.nice >> cInfo.system >> cInfo.idle >> cInfo.iowait >> cInfo.irq >> cInfo.softirq >> cInfo.steal >> cInfo.guest >> cInfo.guest_nice;
+		sum = cInfo.user + cInfo.nice + cInfo.system + cInfo.idle + cInfo.iowait + cInfo.irq + cInfo.softirq + cInfo.steal + cInfo.guest + cInfo.guest_nice;
+		cpuIdleTime.push_back(cInfo.idle);
 		cpuTotalTime.push_back(sum);
-		// std::cout << "sum: " << sum << std::endl;
 		return ;
 }
 
@@ -99,7 +113,7 @@ void catProcStat(std::vector<int>& oldCpuTotalTime, std::vector<int>& oldCpuIdle
 }
 
 void drawDetails(){
-		mvprintw(1, 2, "Cores Count is ");
+		mvprintw(1, 1, "Cores Count is ");
         attron(A_BOLD);
         printw("%d", totalCores);
         attroff(A_BOLD);
@@ -114,7 +128,47 @@ void drawDetails(){
         printw(" Cores");
 }
 
-void drawProgressBar(int y, int x, int start, int end, const std::vector<float>& data, int col){
+void drawCPUInfo(int start, int tpy){
+		mvprintw(start, 1, "-------------");
+		attron(COLOR_PAIR(1));
+		printw("CPU Utilization"); 
+		attroff(COLOR_PAIR(1));
+		switch (tpy) {
+				case 2:
+						printw("(Maximum : ");
+						attron(COLOR_PAIR(1));
+						printw("%d%%", totalCores / (maxNodes + 1) * 100);
+						attroff(COLOR_PAIR(1));
+						break;
+				case 4:
+						printw("(Maximum : ");
+						attron(COLOR_PAIR(1));
+						printw("100%%");
+						attroff(COLOR_PAIR(1));
+						break;
+				default:
+						printw("(Maximum : ");
+						attron(COLOR_PAIR(1));
+						printw("%d%%", totalCores / (maxNodes + 1) * 100);
+						attroff(COLOR_PAIR(1));
+						break;
+		}
+		printw(")-------------");
+}
+
+void drawMemInfo(int start){
+		mvprintw(start, 1, "-------------");
+        attron(COLOR_PAIR(3));
+        printw("MEM Utilization");
+        attroff(COLOR_PAIR(3));
+		printw("(Maximum : ");
+		attron(COLOR_PAIR(3));
+        printw("100%%");
+        attroff(COLOR_PAIR(3));
+        printw(")-------------");
+}
+
+void drawMemProgressBar(int y, int x, int start, int end, const std::vector<float>& data, int col, int typ){
 		int max_x, max_y;
         int counter = 0;
         auto startIterator = data.begin() + start;
@@ -125,6 +179,9 @@ void drawProgressBar(int y, int x, int start, int end, const std::vector<float>&
 		switch (col) {
 				case 2:
 						fillPercent = totalCores / maxNodes;
+						if (typ == 3) {
+								fillPercent = 1;
+						}
 						break;
 				case 4:
 						fillPercent = 1;
@@ -133,20 +190,97 @@ void drawProgressBar(int y, int x, int start, int end, const std::vector<float>&
 						fillPercent = totalCores / maxNodes;
 						break;
 		}
+		int tmpBlock = 0;
+		if (start != 0) tmpBlock = (maxNodes + 1) / 2;
 		for (auto it = startIterator; it != endIterator; it++) {
 				float percentage = *it;
 				float fill_width = bar_width * (percentage / fillPercent);
 				mvprintw(y + 1 + counter, x + 1, "Node %d", start);
-				attron(COLOR_PAIR(1));
-				mvprintw(y + 1 + counter, x + 9, "[");
-				for (int i = 0; i < fill_width; ++i) {
-				 		mvprintw(y + 1 + counter, x + i + 10, "|");
-				}
-				mvprintw(y + 1 + counter, x + bar_width + 10, "]");
-				attroff(COLOR_PAIR(1));
-				mvprintw(y + 1 + counter, x + bar_width + 1 + 10, " %.1f%%", percentage * 100);
+		        attron(COLOR_PAIR(typ));
+        		mvprintw(y + 1 + counter, x + 9, "[");
+                for (int i = 0; i < fill_width; ++i) {
+						mvprintw(y + 1 + counter, x + i + 10, "|");
+		        }
+        		mvprintw(y + 1 + counter, x + bar_width + 10, "]");
+                attroff(COLOR_PAIR(typ));
+		        mvprintw(y + 1 + counter, x + bar_width + 1 + 10, " %.1f%%", percentage * 100);
 				counter++;
 				start++;
+				tmpBlock++;
+		}
+		return ;
+}
+
+void drawProgressBar(int y, int x, int start, int end, const std::vector<float>& data, int col, int typ){
+		int max_x, max_y;
+        int counter = 0;
+        auto startIterator = data.begin() + start;
+        auto endIterator = data.begin() + end;
+		getmaxyx(stdscr, max_y, max_x);
+		int bar_width = max_x / (col + 1) - 10;
+		float fillPercent = totalCores / maxNodes;
+		switch (col) {
+				case 2:
+						fillPercent = totalCores / maxNodes;
+						if (typ == 3) {
+								fillPercent = 1;
+						}
+						break;
+				case 4:
+						fillPercent = 1;
+						break;
+				default:
+						fillPercent = totalCores / maxNodes;
+						break;
+		}
+		int tmpBlock = 0;
+		if (start != 0) tmpBlock = (maxNodes + 1) / 2;
+		for (auto it = startIterator; it != endIterator; it++) {
+				float percentage = *it;
+				float fill_width = bar_width * (percentage / fillPercent);
+				if (isPerNode){
+						if (tmpBlock == nodesImage[drawRow][drawCol]){
+								attron(COLOR_PAIR(5));
+								mvprintw(y + 1 + counter, x + 1, "Node %d", start);
+								attroff(COLOR_PAIR(5)); 
+                				attron(COLOR_PAIR(4));
+		        		        mvprintw(y + 1 + counter, x + 9, "[");
+				                for (int i = 0; i < fill_width; ++i) {
+                		        		mvprintw(y + 1 + counter, x + i + 10, "|");
+                				}
+								for (int i = fill_width; i < bar_width; ++i) {
+										mvprintw(y + 1 + counter, x + i + 10, " ");
+								}
+		                		mvprintw(y + 1 + counter, x + bar_width + 10, "]");
+        				        attroff(COLOR_PAIR(4));
+								attron(COLOR_PAIR(5));
+		                		mvprintw(y + 1 + counter, x + bar_width + 1 + 10, " %.1f%%", percentage * 100);
+								attroff(COLOR_PAIR(5));
+						} else {
+								mvprintw(y + 1 + counter, x + 1, "Node %d", start);
+								attron(COLOR_PAIR(typ));
+								mvprintw(y + 1 + counter, x + 9, "[");
+								for (int i = 0; i < fill_width; ++i) {
+										mvprintw(y + 1 + counter, x + i + 10, "|");
+								}
+								mvprintw(y + 1 + counter, x + bar_width + 10, "]");
+								attroff(COLOR_PAIR(typ));
+								mvprintw(y + 1 + counter, x + bar_width + 1 + 10, " %.1f%%", percentage * 100);
+						}
+				} else {
+						mvprintw(y + 1 + counter, x + 1, "Node %d", start);
+		                attron(COLOR_PAIR(typ));
+        		        mvprintw(y + 1 + counter, x + 9, "[");
+                		for (int i = 0; i < fill_width; ++i) {
+                        		mvprintw(y + 1 + counter, x + i + 10, "|");
+		                }
+        		        mvprintw(y + 1 + counter, x + bar_width + 10, "]");
+                		attroff(COLOR_PAIR(typ));
+		                mvprintw(y + 1 + counter, x + bar_width + 1 + 10, " %.1f%%", percentage * 100);
+				}
+				counter++;
+				start++;
+				tmpBlock++;
 		}
 		return ;
 }
@@ -157,7 +291,7 @@ void updateData(){
         std::vector<int> cpuTotalTime;
         std::vector<int> cpuIdleTime;
 		while (!exitFlag) {
-				// getNodeMemory();
+				getNodeMemory();
 				catProcStat(oldCpuTotalTime, oldCpuIdleTime, cpuTotalTime, cpuIdleTime);
 				{
 						std::unique_lock<std::mutex> lock(mutexStopFlag);
@@ -210,13 +344,54 @@ void checkInput(){
 												{
                                                         std::unique_lock<std::mutex> lock(mutexModeFlag);
                                                         currentMode = 1;
+														isPerNode = false;
                                                         cvModeFlag.notify_all();
                                                         break;
                                                 }
-										case 'i':
-										case 'I':
-												currentMode = 2;
-                                        		continue;
+										case 10:  // 回车
+												{
+                                                        std::unique_lock<std::mutex> lock(mutexModeFlag);
+                                                        currentMode = 2;
+                                                        isPerNode = false;
+                                                        cvModeFlag.notify_all();
+                                                        break;
+                                                }
+										case 27:
+												{
+														if (currentMode == 1) break;
+														timeout(100);  // 设置一个短暂的超时等待更多字符
+														int nextChar = getch();  // 获取下一个字符
+														timeout(-1);  // 恢复正常等待时间
+														if (nextChar == '[') {
+																int thirdChar = getch();
+																if (!isPerNode) {
+																		isPerNode = true;
+																		drawRow = 0;
+																		drawCol = 0;
+																} else {
+																		switch (thirdChar) {
+																				case 'A':  // 上
+																						if (drawRow > 0) drawRow--;
+																						break;
+																				case 'B':  // 下
+																						if (drawRow < (maxNodes + 1) / 2 - 1) drawRow++;
+																						break;
+																				case 'C':  // 右
+																						if (drawCol < 1) drawCol++;
+																						break;
+																				case 'D':  // 左
+																						if (drawCol > 0) drawCol--;
+																						break;
+																		}
+																}
+																{
+																		std::unique_lock<std::mutex> lock(mutexModeFlag);
+																		currentMode = 0;
+																		cvModeFlag.notify_all();
+																}
+														}
+														break;
+												}
 										default:
 												break;
 								}
