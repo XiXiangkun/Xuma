@@ -12,7 +12,7 @@
 - q/Q		: quit
 
 # Sample
-- Per CPU [default]
-![默认模式](images/perCpu.png)
-- Per Node
-![按下C键](images/perNode.png)
+- Per Node [default]
+![默认模式](images/perNode.png)
+- Per CPU
+![按下C键](images/perCpu.png)
