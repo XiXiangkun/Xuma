@@ -13,6 +13,6 @@
 
 # Sample
 - Per CPU [default]
-![默认模式](images/perCPU.png){width=50% height=50%}
+![默认模式](images/perCpu.png){width=50% height=50%}
 - Per Node
 ![按下C键](images/perNode.png){width=50% height=50%}
