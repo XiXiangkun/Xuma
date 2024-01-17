@@ -12,12 +12,18 @@
 #include <termios.h>
 #include <condition_variable>
 #include <mutex>
+#include <algorithm>
+#include <map>
+#include <sys/stat.h>
+#include <dirent.h>
 
 bool isPerNode = false;
 int drawRow = 0;
 int drawCol = 0;
+std::map<int, std::pair<long, long>> previousTimes;
+std::vector<ProcessInfo> processesDisplay;
 
-struct CPUInfo {
+/*struct CPUInfo {
 		std::string cpuNum;	
 		int user;			// 用户态nice优先级运行的时间ce优先级运行的时间
 		int nice;			// nice优先级运行的时间内核态核态
@@ -30,6 +36,97 @@ struct CPUInfo {
 		int guest;			// 虚拟CPU运行时间nice优先级运行的虚拟CPU时间ce优先级运行的虚拟CPU时间
 		int guest_nice;		// nice优先级运行的虚拟CPU时间
 };
+
+struct ProcessInfo {
+		int pid;
+		int virt;			// 虚拟内存 /proc/pid/statm的数值 * 64 KB
+		int res;			// 物理内存 /proc/pid/statm的数值 * 64 KB
+		int shr;			// 共享内存 /proc/pid/statm的数值 * 64 KB
+		float cpu;			// ((utime2 - utime1) + (stime2 - stime1)) / 2
+		float mem;			// res * 64 / totalMem
+		std::string name;	// 进程名称
+		int processor;		// 进程最后所在cpu
+};*/
+
+int getMemSize() {
+		std::string unusedVariable;
+		int memSize;
+		std::string memPath = "/proc/meminfo";
+		std::ifstream memFile(memPath);
+		if (memFile.is_open()) {
+				std::string memLine;
+				std::getline(memFile, memLine);
+				std::istringstream iss(memLine);
+				iss >> unusedVariable >> memSize;
+		}
+		return memSize;
+}
+
+void getProcessInfo(){
+		int totalMemSize = getMemSize();
+		// std::map<int, std::pair<long, long>> previousTimes;
+		int coresPerNode = totalCores / (maxNodes + 1);
+		int targetNode = nodesImage[drawRow][drawCol];
+		processesDisplay.clear();
+		struct stat st;
+		// std::vector<std::string> processes;
+		if (stat("/proc", &st) == 0 && S_ISDIR(st.st_mode)) {
+				DIR *dir = opendir("/proc");
+				if (dir != nullptr) {
+						struct dirent *entry;
+						while ((entry = readdir(dir)) != nullptr) {
+								if (entry->d_type == DT_DIR && isdigit(entry->d_name[0])) {
+										// processes.push_back(entry->d_name);
+										std::string pid = entry->d_name;
+										std::string path = "/proc/" + pid + "/stat";
+										std::ifstream file(path);
+										if (file.is_open()) {
+												std::string line;
+						                        std::getline(file, line);
+                        						std::istringstream iss(line);
+												std::vector<std::string> tokens;
+						                        std::string token;
+                        						while (std::getline(iss, token, ' ')) {
+						                                if (!token.empty()) {
+                        						                tokens.push_back(token);
+						                                }
+                        						}
+												int processor = std::stoi(tokens[38]);
+												long utime = std::stol(tokens[13]);
+												long stime = std::stol(tokens[14]);
+												if (previousTimes.find(std::stoi(pid)) == previousTimes.end() || previousTimes[std::stoi(pid)].second != processor) {
+														previousTimes[std::stoi(pid)] = {utime + stime, processor};
+												} else {
+														long prevTotalTime = previousTimes[std::stoi(pid)].first;
+														float cpuUsage = (float)(utime + stime - prevTotalTime) / (2.0f * sysconf(_SC_CLK_TCK)) * 100.0f;
+														previousTimes[std::stoi(pid)] = {utime + stime, processor};
+														if (coresPerNode * targetNode <= processor && processor < coresPerNode * (targetNode + 1)) {
+														// if (80 <= processor && processor < 88) {
+																int virt, res, shr;
+																std::string statmPath = "/proc/" + pid + "/statm";
+                                								std::ifstream procStatm(statmPath);
+								                                std::string statmLine;
+                                								std::getline(procStatm, statmLine);
+								                                std::istringstream issM(statmLine);
+                                								issM >> virt >> res >> shr;
+																ProcessInfo tmpProcessInfo = {std::stoi(pid), virt * 64, res * 64, shr * 64, cpuUsage, static_cast<float>(res * 64) / totalMemSize, tokens[1], processor};
+								                                processesDisplay.push_back(tmpProcessInfo); 
+														}
+												}
+										}
+								}
+						}
+				}
+				closedir(dir);
+		}
+		std::sort(processesDisplay.begin(), processesDisplay.end(), [](const ProcessInfo& a, const ProcessInfo& b){
+				return a.cpu > b.cpu;
+		});
+		/*if (!processesDisplay.empty()){
+				std::cout << "+++++++++++++" << processesDisplay[0].name << "+++++++++++" << processesDisplay[0].cpu << "++++++++++++++++" << std::endl;
+		}*/
+
+}
 
 void getNodeMemory(){
 		float tmpRes;
@@ -126,6 +223,16 @@ void drawDetails(){
         printw("%d", totalCores / (maxNodes + 1));
         attroff(A_BOLD);
         printw(" Cores");
+}
+
+void drawProcesses() {
+		int row = 5; 
+		for (const auto& process : processesDisplay) {
+				mvprintw(row, 0, "PID: %d, CPU: %.2f%%, MEM: %.2f%%, VIRT: %d, RES: %d, SHR: %d, NAME: %s, CPU#: %d", process.pid, process.cpu, process.mem, process.virt, process.res, process.shr, process.name.c_str(), process.processor);
+        		row++;
+        		if (row >= LINES) break;  // 停止，如果行数超过屏幕大小
+    }
+		return;
 }
 
 void drawCPUInfo(int start, int tpy){
@@ -291,8 +398,15 @@ void updateData(){
         std::vector<int> cpuTotalTime;
         std::vector<int> cpuIdleTime;
 		while (!exitFlag) {
-				getNodeMemory();
-				catProcStat(oldCpuTotalTime, oldCpuIdleTime, cpuTotalTime, cpuIdleTime);
+				if (currentMode == 0 || currentMode == 1) {
+						getNodeMemory();
+						catProcStat(oldCpuTotalTime, oldCpuIdleTime, cpuTotalTime, cpuIdleTime);
+				} else if (currentMode == 2) {
+						getProcessInfo();
+				} else {
+						getNodeMemory();
+                        catProcStat(oldCpuTotalTime, oldCpuIdleTime, cpuTotalTime, cpuIdleTime);
+				}
 				{
 						std::unique_lock<std::mutex> lock(mutexStopFlag);
 						if (cvStopFlag.wait_for(lock, std::chrono::seconds(2)) == std::cv_status::no_timeout) {
@@ -350,6 +464,7 @@ void checkInput(){
                                                 }
 										case 10:  // 回车
 												{
+														if (currentMode == 1 || currentMode == 2) break;
                                                         std::unique_lock<std::mutex> lock(mutexModeFlag);
                                                         currentMode = 2;
                                                         isPerNode = false;
@@ -358,7 +473,7 @@ void checkInput(){
                                                 }
 										case 27:
 												{
-														if (currentMode == 1) break;
+														if (currentMode == 1 || currentMode == 2) break;
 														timeout(100);  // 设置一个短暂的超时等待更多字符
 														int nextChar = getch();  // 获取下一个字符
 														timeout(-1);  // 恢复正常等待时间

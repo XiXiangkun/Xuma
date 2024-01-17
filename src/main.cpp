@@ -68,7 +68,7 @@ int main() {
                 clear();
                 drawDetails();
                 switch (currentMode) {
-						case 0:
+						case 0:  // 只显示Node和Mem
 								drawCPUInfo(startPosition, 2);
 								drawProgressBar(startPosition, 0, 0, realNodesDivide2, cpuUtilizationPerNode, 2, 1);
 				                drawProgressBar(startPosition, maxXDivide2, realNodesDivide2, realMaxNodes, cpuUtilizationPerNode, 2, 1);
@@ -83,7 +83,7 @@ int main() {
                 		        		}
                					}
 								break;
-						case 1:
+						case 1:  // 显示Core和Mem
 								drawCPUInfo(startPosition, 4);
 								drawProgressBar(startPosition, 0, 0, realCoresDivide4, cpuUtilizationPerCore, 4, 1);
                                 drawProgressBar(startPosition, maxXDivide4, realCoresDivide4, realCoresDivide4 * 2, cpuUtilizationPerCore, 4, 1);
@@ -100,8 +100,17 @@ int main() {
                                         }
                                 }
 								break;
-						case 2:
-						default:
+						case 2:  // 显示具体的进程%CPU
+								drawProcesses();
+								refresh();
+								{
+                                        std::unique_lock<std::mutex> lock(mutexModeFlag);
+                                        if (cvModeFlag.wait_for(lock, std::chrono::milliseconds(1000)) == std::cv_status::no_timeout) {
+                                                break; // 如果条件满足，退出循环
+                                        }
+                                }
+                                break;
+						default:  // 默认情况，只显示Node和Mem
 								drawCPUInfo(startPosition, 2);
                                 drawProgressBar(startPosition, 0, 0, realNodesDivide2, cpuUtilizationPerNode, 2, 1);
                                 drawProgressBar(startPosition, maxXDivide2, realNodesDivide2, realMaxNodes, cpuUtilizationPerNode, 2, 1);
