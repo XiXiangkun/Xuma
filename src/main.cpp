@@ -1,15 +1,16 @@
+#include <global.hpp>
 #include <xuma.hpp>
-#include <vector>
-#include <thread>
-#include <numa.h>
-#include <termios.h>
-#include <ncurses.h>
-#include <iostream>
+#include <process.hpp>
+#include <cpumem.hpp>
+#include <draw.hpp>
 
 bool exitFlag = false;
 int maxNodes = 0;
 int totalCores = 0;
 int currentMode = 0;  // 0: 显示per Node的CPU占用 1: 显示 per Core的CPU占用 2: 显示具体每个Core上的进程
+bool isPerNode = false;
+int drawRow = 0;
+int drawCol = 0;
 std::vector<float> memUtilizationPerNode;
 std::vector<float> cpuUtilizationPerNode;
 std::vector<float> cpuUtilizationPerCore;
@@ -18,6 +19,8 @@ std::mutex mutexModeFlag;
 std::mutex mutexStopFlag;
 std::condition_variable cvModeFlag;
 std::condition_variable cvStopFlag;
+std::map<int, std::pair<long, long>> previousTimes;
+std::vector<ProcessInfo> processesDisplay;
 
 
 int main() {
