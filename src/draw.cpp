@@ -17,19 +17,33 @@ void drawDetails(){
 }
 
 void drawProcesses() {
-		mvprintw(3, 0, "PID    VIRT    RES     SHR     %%CPU    %%MEM    NAME    CORE");
-		/*int colWidth = 10;
-		char fillChar = ' ';
-		mvprintw(3, 0, std::setfill(fillChar) + std::setw(colWidth) + "PID" + std::setw(colWidth) + "VIRT" + std::setw(colWidth) + "RES" + std::setw(colWidth) + "SHR" + std::setw(colWidth) + "%%CPU" + std::setw(colWidth) + "%%MEM" + std::setw(colWidth) + "NAME" + std::setw(colWidth) + "CORE");*/
-		// mvprintw(3, 0, std::setw(colWidth) + "PID" + std::setw(colWidth) + "VIRT" + std::setw(colWidth) + "RES" + std::setw(colWidth) + "SHR" + std::setw(colWidth) + "%%CPU" + std::setw(colWidth) + "%%MEM" + std::setw(colWidth) + "NAME" + std::setw(colWidth) + "CORE");
-        int row = 4;
-        for (const auto& process : processesDisplay) {
-				mvprintw(row, 0, "%-6d %-6d %-6d %-6d %-6.2f%% %-6.2f%% %-20s %-6d", process.pid, process.virt, process.res, process.shr, process.cpu, process.mem, process.name.c_str(), process.processor);
-                // mvprintw(row, 0, "PID: %d, CPU: %.2f%%, MEM: %.2f%%, VIRT: %d, RES: %d, SHR: %d, NAME: %s, CPU#: %d", process.pid, process.cpu, process.mem, process.virt, process.res, process.shr, process.name.c_str(), process.processor);
-                row++;
-                if (row >= LINES) break;  // 停止，如果行数超过屏幕大小
+    // 定义各列宽度
+    const int pidWidth = 10;
+    const int virtWidth = 10;
+    const int resWidth = 10;
+    const int shrWidth = 10;
+    const int cpuWidth = 10;
+    const int memWidth = 10;
+	const int spaceWidth = 5;
+    const int nameWidth = 50;
+    const int coreWidth = 6;
+
+    attron(COLOR_PAIR(5));
+	mvprintw(3, 0, "%*s %*s %*s %*s %*s %*s %*s %-*s %*s",
+             pidWidth, "PID", virtWidth, "VIRT", resWidth, "RES",
+             shrWidth, "SHR", cpuWidth, "%CPU", memWidth, "%MEM",
+			 spaceWidth, "", nameWidth, "NAME", coreWidth, "CORE");
+	attroff(COLOR_PAIR(5));
+    int row = 4;
+    for (const auto& process : processesDisplay) {
+        mvprintw(row, 0, "%*d %*d %*d %*d %*.1f %*.1f %*s  %-*s %*d",
+                 pidWidth, process.pid, virtWidth, process.virt, resWidth, process.res,
+                 shrWidth, process.shr, cpuWidth, process.cpu, memWidth, process.mem,
+                 spaceWidth, " ", nameWidth, process.name.c_str(), coreWidth, process.processor);
+        row++;
+        if (row >= LINES) break;  // 如果行数超过屏幕大小则停止
     }
-        return;
+    return;
 }
 
 void drawCPUInfo(int start, int tpy){
